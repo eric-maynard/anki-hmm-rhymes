@@ -10,14 +10,38 @@ from anki.hooks import addHook, wrap
 import shutil , os , glob , random , sys
 from bs4 import BeautifulSoup
 CONFIG = mw.addonManager.getConfig(__name__)
-from aqt.utils import showInfo , askUser , showText , tooltip
-import re
 import unicodedata
 
 
-# This should return a list of rhymes, each one being a single hanzi
-def extract_ending(formatted_pinyin):
+class CardData:
+    def __init__(self, hanzi, pinyin, initial, ending):
+        self.hanzi = hanzi
+        self.pinyin = pinyin
+        self.initial = initial
+        self.ending = ending
+
+
+# Convert a card to [CardData]
+def parse_card(card):
+    hanzi = extract_hanzi(card)
+    results = []
+    for h in hanzi:
+        pinyin = None
+        if h in hanzi_pinyin_cache:
+            pinyin = hanzi_pinyin_cache[h]
+        elif len(hanzi) == 1:
+            pinyin = extract_pinyin(card)
+        if pinyin is not None:
+            initial, ending = extract_initial_ending(pinyin)
+            if ending != "?":
+                results.append(CardData(h, pinyin, initial, ending))
+    return results
+
+
+# pinyin -> (initial, ending)
+def extract_initial_ending(formatted_pinyin):
     # TODO fix some HMM endings, e.g. jiu = ou
+    # todo rewrite this method
     letters = ""
     numbers = ""
     for c in formatted_pinyin:
@@ -25,24 +49,20 @@ def extract_ending(formatted_pinyin):
             letters += c
         else:
             numbers += c
-    endings = ["a", "ai", "ao", "an", "ang", "e", "ei", "n", "ong", "ng", "o", "ou", "i", "u"]
+    endings = ["a", "ai", "ao", "an", "ang", "e", "ei", "n", "ong", "ng", "o", "ou", "i"]
     exception_full_pinyin = ["yi", "wu", "yu", "ju", "qu", "xu", "lu", "nu"]
     for ending in endings:
         if letters.endswith(ending):
             if letters in exception_full_pinyin:
-                return numbers
+                return letters, numbers
             else:
-                return ending + numbers
+                return formatted_pinyin.replace(ending + numbers, ""), ending + numbers
     return "?"
 
 
 # Dict[ending, Dict[initial, Set[hanzi]]
 card_cache = None
-
-
-def extract_initial(formatted_pinyin):
-    ending = extract_ending(formatted_pinyin)
-    return formatted_pinyin.replace(ending, "")
+hanzi_pinyin_cache = dict()
 
 
 def extract_hanzi(card):
@@ -56,29 +76,32 @@ def extract_hanzi(card):
 # Update the card cache
 def update_cache():
     global card_cache
+    global hanzi_pinyin_cache
     if card_cache is not None:
         return
-    card_cache = dict()
+
     all_cards = [mw.col.get_card(cid) for cid in mw.col.find_cards("-is:due -is:new")]
 
     # Comment this to enable cross_deck hints:
     # current_deck = mw.reviewer.card.current_deck_id()
     # all_cards = [c for c in all_cards if c.current_deck_id() == current_deck]
 
-    card_pinyin_tuples = [(c, extract_pinyin(c)) for c in all_cards]
-    for c, p in card_pinyin_tuples:
-        if len(p) > 0:
-            formatted = format_pinyin(p)
-            ending = extract_ending(formatted)
-            initial = extract_initial(formatted)
-            hanzi = extract_hanzi(c)
-            # todo make everything work with multi hanzi cards
-            if len(hanzi) == 1:
-                if ending not in card_cache:
-                    card_cache[ending] = dict()
-                if initial not in card_cache[ending]:
-                    card_cache[ending][initial] = set()
-                card_cache[ending][initial].add(hanzi)
+    # First collect hanzi -> pinyin cache
+    parsed_cards_2d = [parse_card(c) for c in all_cards]
+    for c in [item for sublist in parsed_cards_2d for item in sublist]:
+        if len(c.hanzi) == 1:
+            if c.hanzi not in hanzi_pinyin_cache:
+                hanzi_pinyin_cache[c.hanzi] = c.pinyin
+
+    # Then build the homophone cache:
+    card_cache = dict()
+    parsed_cards_2d = [parse_card(c) for c in all_cards]
+    for c in [item for sublist in parsed_cards_2d for item in sublist]:
+        if c.ending not in card_cache:
+            card_cache[c.ending] = dict()
+        if c.initial not in card_cache[c.ending]:
+            card_cache[c.ending][c.initial] = set()
+        card_cache[c.ending][c.initial].add(c.hanzi)
 
 
 MAX_RHYMES = 5
@@ -88,8 +111,7 @@ MAX_RHYME_INITIALS = 4
 # This should return a list of homophones, each one being a single hanzi
 def get_homophones(formatted_pinyin, exclude=""):
     update_cache()
-    initial = extract_initial(formatted_pinyin)
-    ending = extract_ending(formatted_pinyin)
+    initial, ending = extract_initial_ending(formatted_pinyin)
     if ending not in card_cache:
         card_cache[ending] = dict()
     if initial not in card_cache[ending]:
@@ -100,8 +122,7 @@ def get_homophones(formatted_pinyin, exclude=""):
 # List[List[initial, hanzi]]
 def get_rhymes(formatted_pinyin):
     update_cache()
-    initial = extract_initial(formatted_pinyin)
-    ending = extract_ending(formatted_pinyin)
+    initial, ending = extract_initial_ending(formatted_pinyin)
     sampled_rhyme_lists = list(card_cache[ending].items())[:MAX_RHYME_INITIALS]
     return [(i, list(hanzi)[:MAX_RHYMES]) for i, hanzi in sampled_rhyme_lists if i != initial]
 
@@ -159,7 +180,6 @@ def extract_pinyin_list(card):
 
 label: QLabel = None
 
-
 def apply_label(label_text):
     global label
     if label is None:
@@ -176,16 +196,13 @@ def apply_label(label_text):
 
 
 def get_label(card):
-    pinyin = extract_pinyin(card)
-    formatted_pinyin = format_pinyin(pinyin)
-    ending = extract_ending(formatted_pinyin)
-    homophones = get_homophones(formatted_pinyin, extract_hanzi(mw.reviewer.card))
-    rhymes = get_rhymes(formatted_pinyin)
+    card_data = parse_card(card)
     label_string = ""
-    if ending != "?":
-        # label_string += "Formatted Pinyin:\t" + formatted_pinyin + "\n"
-        label_string += "HMM Final:\t" + ending + "\n"
-        label_string += "Homophones:\t" + ', '.join(homophones) + "\n"
+    for c in card_data:
+        homophones = get_homophones(c.pinyin, c.hanzi)
+        rhymes = get_rhymes(c.pinyin)
+        label_string += f"{c.hanzi} ({c.pinyin} -> {c.initial}/{c.ending}):\n"
+        label_string += f"Homophones: {', '.join(homophones)}\n"
         for i, h in rhymes:
             label_string += f"Rhymes ({i}):\t" + ', '.join(h) + "\n"
     return label_string
@@ -206,8 +223,7 @@ def remove_label(reviewer, card, ease):
         update_cache()
         pinyin = extract_pinyin(card)
         formatted_pinyin = format_pinyin(pinyin)
-        initial = extract_initial(formatted_pinyin)
-        ending = extract_ending(formatted_pinyin)
+        initial, ending = extract_initial_ending(formatted_pinyin)
         if ending not in card_cache:
             card_cache[ending] = dict()
         if initial not in card_cache[ending]:
