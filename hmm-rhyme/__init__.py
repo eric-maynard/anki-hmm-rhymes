@@ -50,10 +50,10 @@ def extract_initial_ending(pinyin):
     initial, ending = "", ""
     if len(pinyin) < 2:
         return initial, ending
-    if pinyin[1] == 'i' or starts_with_any(pinyin, ["zhi, chi, shi"]):
+    if pinyin[1] == 'i' or starts_with_any(pinyin, ["zhi", "chi", "shi"]):
         initial = pinyin[:pinyin.find('i') + 1]
         ending = pinyin.replace(initial, '')
-    elif pinyin[1] == 'u' or starts_with_any(pinyin, ["zhu, chu, shu"]):
+    elif pinyin[1] == 'u' or starts_with_any(pinyin, ["zhu", "chu", "shu"]):
         # "fictional" HMM
         initial = pinyin[:pinyin.find('u') + 1]
         ending = pinyin.replace(initial, '')
