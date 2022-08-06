@@ -30,7 +30,7 @@ def parse_card(card):
         if h in hanzi_pinyin_cache:
             pinyin = hanzi_pinyin_cache[h]
         elif len(hanzi) == 1:
-            pinyin = extract_pinyin(card)
+            pinyin = format_pinyin(extract_pinyin(card))
         if pinyin is not None:
             initial, ending = extract_initial_ending(pinyin)
             if ending != "?":
@@ -57,7 +57,7 @@ def extract_initial_ending(formatted_pinyin):
                 return letters, numbers
             else:
                 return formatted_pinyin.replace(ending + numbers, ""), ending + numbers
-    return "?"
+    return "?", "?"
 
 
 # Dict[ending, Dict[initial, Set[hanzi]]
@@ -68,9 +68,24 @@ hanzi_pinyin_cache = dict()
 def extract_hanzi(card):
     note = card.note()
     for (name, value) in note.items():
-        if "hanzi".lower() in name.lower() or "simplified".lower() in name.lower():
-            return value
-    return card.question()
+        if "hanzi" in name.lower() or "simplified" in name.lower():
+            answer = ""
+            reading = False
+            skipping = 0
+            for c in value:
+                if c == "<":
+                    skipping += 1
+                elif c == ">":
+                    skipping -= 1
+                elif skipping == 0:
+                    if c.isalnum() and not reading:
+                        reading = True
+                    elif not c.isalnum() and reading:
+                        return answer
+                    if reading:
+                        answer += c
+            return answer
+    return ""
 
 
 # Update the card cache
@@ -87,7 +102,8 @@ def update_cache():
     # all_cards = [c for c in all_cards if c.current_deck_id() == current_deck]
 
     # First collect hanzi -> pinyin cache
-    parsed_cards_2d = [parse_card(c) for c in all_cards]
+    total_cards = [mw.col.get_card(cid) for cid in mw.col.find_cards("-is:suspended")]
+    parsed_cards_2d = [parse_card(c) for c in total_cards]
     for c in [item for sublist in parsed_cards_2d for item in sublist]:
         if len(c.hanzi) == 1:
             if c.hanzi not in hanzi_pinyin_cache:
@@ -105,7 +121,7 @@ def update_cache():
 
 
 MAX_RHYMES = 5
-MAX_RHYME_INITIALS = 4
+MAX_RHYME_INITIALS = 2
 
 
 # This should return a list of homophones, each one being a single hanzi
@@ -194,8 +210,8 @@ def apply_label(label_text):
     label.move(center.x(), bottom_height)
     label.show()
 
-
 def get_label(card):
+    update_cache()
     card_data = parse_card(card)
     label_string = ""
     for c in card_data:
@@ -203,8 +219,8 @@ def get_label(card):
         rhymes = get_rhymes(c.pinyin)
         label_string += f"{c.hanzi} ({c.pinyin} -> {c.initial}/{c.ending}):\n"
         label_string += f"Homophones: {', '.join(homophones)}\n"
-        for i, h in rhymes:
-            label_string += f"Rhymes ({i}):\t" + ', '.join(h) + "\n"
+        for i, r in rhymes:
+            label_string += f"Rhymes ({i}): {', '.join(r)}\n"
     return label_string
 
 
