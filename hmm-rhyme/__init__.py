@@ -51,12 +51,23 @@ def extract_initial_ending(pinyin):
     if len(pinyin) < 2:
         return initial, ending
     if pinyin[1] == 'i' or starts_with_any(pinyin, ["zhi", "chi", "shi"]):
+        # todo many of these are supposed to be classified as male?
         initial = pinyin[:pinyin.find('i') + 1]
         ending = pinyin.replace(initial, '')
+        if ending == 'n':
+            ending = 'en'
+        elif ending == 'ng':
+            ending = 'eng'
     elif pinyin[1] == 'u' or starts_with_any(pinyin, ["zhu", "chu", "shu"]):
         # "fictional" HMM
         initial = pinyin[:pinyin.find('u') + 1]
         ending = pinyin.replace(initial, '')
+        if ending == 'i':
+            ending = 'ei'
+        elif ending == 'n':
+            ending = 'en'
+        elif ending == 'ng':
+            ending = 'eng'
     else:
         # "male" HMM
         letters = ""
