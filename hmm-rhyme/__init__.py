@@ -39,25 +39,41 @@ def parse_card(card):
 
 
 # pinyin -> (initial, ending)
-def extract_initial_ending(formatted_pinyin):
-    # TODO fix some HMM endings, e.g. jiu = ou
-    # todo rewrite this method
-    letters = ""
-    numbers = ""
-    for c in formatted_pinyin:
-        if c.isalpha():
-            letters += c
-        else:
-            numbers += c
-    endings = ["a", "ai", "ao", "an", "ang", "e", "ei", "n", "ong", "ng", "o", "ou", "i"]
-    exception_full_pinyin = ["yi", "wu", "yu", "ju", "qu", "xu", "lu", "nu"]
-    for ending in endings:
-        if letters.endswith(ending):
-            if letters in exception_full_pinyin:
-                return letters, numbers
+def extract_initial_ending(pinyin):
+    # todo some more edge cases
+    def starts_with_any(needle, haystack):
+        for h in haystack:
+            if needle.startswith(h):
+                return True
+        return False
+
+    initial, ending = "", ""
+    if len(pinyin) < 2:
+        return initial, ending
+    if pinyin[1] == 'i' or starts_with_any(pinyin, ["zhi, chi, shi"]):
+        initial = pinyin[:pinyin.find('i') + 1]
+        ending = pinyin.replace(initial, '')
+    elif pinyin[1] == 'u' or starts_with_any(pinyin, ["zhu, chu, shu"]):
+        # "fictional" HMM
+        initial = pinyin[:pinyin.find('u') + 1]
+        ending = pinyin.replace(initial, '')
+    else:
+        # "male" HMM
+        letters = ""
+        numbers = ""
+        for c in pinyin:
+            if c.isalpha():
+                letters += c
             else:
-                return formatted_pinyin.replace(ending + numbers, ""), ending + numbers
-    return "?", "?"
+                numbers += c
+
+        endings = ["a", "ai", "ao", "an", "ang", "e", "ei", "en", "eng", "o", "ong", "ou"]
+        for e in endings:
+            if letters.endswith(e):
+                ending = e + numbers
+                initial = pinyin.replace(ending, '')
+    return initial, ending
+
 
 
 # Dict[ending, Dict[initial, Set[hanzi]]
